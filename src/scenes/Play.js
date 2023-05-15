@@ -7,16 +7,39 @@ class Play extends Phaser.Scene {
         this.load.atlas('player', 'assets/spriteAtlas.png', 'assets/spriteAtlas.json');
         this.load.image('hole','assets/hole.png');
         this.load.image('gradient','assets/gradient.png');
+        this.load.audio('footsteps', ['assets/footsteps.ogg']);
+        this.load.audio('button', ['assets/death.ogg']);
+        this.load.audio('death', ['assets/death.ogg']);
     }
 
     create() {
+        this.bgm = this.sound.add('footsteps', { 
+            mute: false,
+            volume: 0.125,
+            rate: 1,
+            loop: true 
+        });
+        this.bgm.play();
+        this.deathSound = this.sound.add('death', { 
+            mute: false,
+            volume: 0.25,
+            rate: 1,
+            loop: false 
+        });
+        this.buttonSoundEffect = this.sound.add('button', { 
+            mute: false,
+            volume: 0.25,
+            rate: 1,
+            loop: false 
+        });
+
         this.gradient = this.add.tileSprite(750, 240, 1500, 480, 'gradient');
 
         this.keySpace = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-        this.anims.create({
+        this.runAnim = this.anims.create({
             key: "run",
-            frameRate: 20,
+            frameRate: 5,
             frames: this.anims.generateFrameNames('player', {
                 prefix: "run",
                 start: 1,
@@ -24,9 +47,9 @@ class Play extends Phaser.Scene {
             }),
             repeat: -1
         });
-        this.anims.create({
+        this.jumpAnim = this.anims.create({
             key: "jump",
-            frameRate: 20,
+            frameRate: 5,
             frames: this.anims.generateFrameNames('player', {
                 prefix: "jump",
                 start: 1,
@@ -48,21 +71,46 @@ class Play extends Phaser.Scene {
         this.player.play("run");
 
         this.gameSpeed = 1;
-        this.gamePaused = true;
         this.spawning = false;
         this.playerJumpDt = 0;
+        this.holeColliding = false;
+        this.levellingUp = false;
+        this.gameOver = false;
+        this.distance = 0;
 
-        this.time.delayedCall(1, () => { 
-            this.gamePaused = false; 
+        this.scoreTextConfig = {
+            fontFamily: 'Courier',
+            fontSize: '28px',
+            color: '#ffffff',
+            align: 'right',
+            padding: {
+            top: 5,
+            bottom: 5,
+            },
+        }
+        this.scoreText = this.add.text(game.config.width - 100, 50, Math.floor(this.distance), this.scoreTextConfig);
+        this.player.play("run");
+        this.time.delayedCall(30, () => {
+            this.player.play("run");
         });
     }
 
     update() {
-        this.gradient.tilePositionX += (this.gameSpeed * 5);
+        console.log(this.gameOver);
+        this.bgm.rate = this.gameSpeed;
+        this.runAnim.frameRate = this.gameSpeed * 5;
 
-        if (!this.spawning && !this.gamePaused) {
+        if (!this.gameOver) {
+            this.gradient.tilePositionX += (this.gameSpeed * 4.2);
+            this.distance += 0.1 * this.gameSpeed;
+        }
+
+        this.scoreText.text = Math.floor(this.distance);
+    
+
+        if (!this.spawning && !this.gameOver) {
             this.spawning = true;
-            this.time.delayedCall((Math.floor(Math.random() * 3) * 1000) + 1000, () => {
+            this.time.delayedCall(Math.abs((Math.floor(Math.random() * 3) * 1000) + 1000 - (100 * this.gameSpeed)), () => {
                 let newHole = new Hole(this);
                 this.holeGroup.add(newHole);
                 this.spawning = false;
@@ -70,8 +118,17 @@ class Play extends Phaser.Scene {
         }
 
         if(Phaser.Input.Keyboard.JustDown(this.keySpace)) {
-            this.player.play("jump");
-            this.playerJumping = true;
+            if (this.gameOver) {
+                this.buttonSoundEffect.play();
+                this.time.delayedCall(400, () => {
+                    this.scene.restart();
+                });
+            } else {
+                this.player.play("jump");
+                this.playerJumping = true;
+                this.playingJumpEffect = true;
+                this.bgm.stop();
+            }
         }
         if (this.playerJumping) {
             this.playerJumpDt++;
@@ -80,16 +137,49 @@ class Play extends Phaser.Scene {
                 this.playerJumping = false;
                 this.playerJumpDt = 0;
                 this.player.play("run");
+                if (!this.bgm.isPlaying) {
+                    this.bgm.play();
+                }
             }
         } else {
             this.player.setPosition(150, this.game.config.height / 2);
         }
 
         this.physics.world.collide(this.player, this.holeGroup, this.holeCollision, null, this);
+
+        if (!this.levellingUp) {
+            this.levellingUp = true;
+            this.time.delayedCall(1000, () => {
+                if (!this.gameOver) {
+                    this.gameSpeed += 0.1;
+                    this.levellingUp = false;
+                }
+            });
+        }
     }
 
     holeCollision() {
-        console.log("hole collision");
+        if (!this.holeColliding) {
+            this.gameOver = true;
+            this.holeColliding = true;
+            console.log("hole collision");
+            this.deathSound.play();
+            this.player.destroy();
+            this.bgm.stop();
+            this.gameSpeed = 0;
+            this.time.delayedCall(300, () => {
+                this.holeColliding = false;
+            });
+
+            this.add.text(game.config.width / 2 - 280, game.config.height / 2 - 163, "Congratulations. You travelled:", this.scoreTextConfig);
+            this.add.text(game.config.width / 2 - 70, game.config.height / 2 - 133, Math.floor(this.distance), this.scoreTextConfig);
+            this.add.text(game.config.width / 2 - 100, game.config.height / 2 - 100, "meters", this.scoreTextConfig);
+            this.add.text(game.config.width / 2 - 250, game.config.height / 2 - 70, "Press Space to try again.", this.scoreTextConfig);
+
+            this.add.text(game.config.width / 2 - 500, game.config.height / 2 + 70, "All sound effects sourced from GameBurp's free sample pack at:", this.scoreTextConfig);
+            this.add.text(game.config.width / 2 - 325, game.config.height / 2 + 100, "http://www.gameburp.com/free-game-sound-fx/", this.scoreTextConfig);
+            this.add.text(game.config.width / 2 - 400, game.config.height / 2 + 130, "All other assets created for this project", this.scoreTextConfig);
+        }
     }
     
 }
